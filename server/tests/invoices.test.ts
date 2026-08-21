@@ -1,7 +1,9 @@
-﻿// invoices.test.ts â€” invoice generation + payment status tests.
+﻿// invoices.test.ts — invoice generation + payment status tests.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from './helpers.ts';
 import { query } from '../src/lib/query.ts';
+import { hashPassword } from '../src/lib/crypto.ts';
+import { randomId } from '../src/lib/id.ts';
 
 let baseUrl: string;
 let server: ReturnType<typeof import('@hono/node-server')['serve']>;
@@ -15,20 +17,27 @@ let invoiceId: string;
 beforeAll(async () => {
   ({ server, baseUrl } = await buildApp());
 
-  // Register admin + customer
-  const adminReg = await fetch(`${baseUrl}/api/auth/register`, {
+  // Create admin directly in DB
+  const adminHash = await hashPassword('Testpass123');
+  const adminUid = randomId();
+  await query.run(
+    `INSERT INTO users (id, email, name, password, role) VALUES (?, ?, ?, ?, 'admin')`,
+    adminUid, 'inv-admin@ghazwah.test', 'Inv Admin', adminHash,
+  );
+  const adminLogin = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'inv-admin@ghazwah.test', name: 'Inv Admin', password: 'Testpass123', role: 'admin' }),
+    body: JSON.stringify({ email: 'inv-admin@ghazwah.test', password: 'Testpass123' }),
   });
-  adminToken = ((await adminReg.json()) as { token: string }).token;
+  adminToken = ((await adminLogin.json()) as { accessToken: string }).accessToken;
 
+  // Register customer via public endpoint
   const custReg = await fetch(`${baseUrl}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'inv-customer@ghazwah.test', name: 'Inv Customer', password: 'Testpass123', role: 'customer' }),
+    body: JSON.stringify({ email: 'inv-customer@ghazwah.test', name: 'Inv Customer', password: 'Testpass123' }),
   });
-  customerToken = ((await custReg.json()) as { token: string }).token;
+  customerToken = ((await custReg.json()) as { accessToken: string }).accessToken;
 
   const custRow = await query.get('SELECT id FROM customers WHERE name = ?', 'Inv Customer');
   customerId = custRow?.id as string;
@@ -41,7 +50,7 @@ beforeAll(async () => {
   });
   deviceId = ((await devRes.json()) as { device: { id: string } }).device.id;
 
-  // Create + complete work order
+  // Create work order
   const woRes = await fetch(`${baseUrl}/api/work-orders`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
@@ -92,7 +101,6 @@ describe('invoices', () => {
     expect(res.status).toBe(201);
     const data = (await res.json()) as { invoice: { id: string; total: number; payment_status: string } };
     expect(data.invoice.payment_status).toBe('unpaid');
-    // total = (120 + 0) + 80 - 10 + 5 = 195
     expect(data.invoice.total).toBe(195);
     invoiceId = data.invoice.id;
   });
@@ -126,14 +134,12 @@ describe('invoices', () => {
       body: JSON.stringify({ amount: 100, method: 'cash' }),
     });
     expect(res.status).toBe(201);
-    // Verify invoice payment_status updated
     const invRes = await api(`/api/invoices/${invoiceId}`, { token: adminToken });
     const invData = (await invRes.json()) as { invoice: { payment_status: string } };
     expect(invData.invoice.payment_status).toBe('partial');
   });
 
-  it('admin can record full payment â†’ status becomes paid', async () => {
-    // Pay remaining 95
+  it('admin can record full payment → status becomes paid', async () => {
     const res = await api(`/api/invoices/${invoiceId}/payments`, {
       method: 'POST',
       token: adminToken,
@@ -154,4 +160,3 @@ describe('invoices', () => {
     expect(res.status).toBe(404);
   });
 });
-

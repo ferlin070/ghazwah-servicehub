@@ -1,68 +1,47 @@
-﻿// lib/query.ts — thin wrapper over sql.js that mimics better-sqlite3 API.
-import { getDb, saveDb } from '../db/db.ts';
-import type { SqlValue } from 'sql.js';
+﻿// lib/query.ts — PostgreSQL query helpers using node-postgres pool.
+// Auto-converts ? placeholders to $1, $2, ... for PostgreSQL compatibility.
+import { pool } from '../db/db.ts';
 
-let inTransaction = false;
+function convertPlaceholders(sql: string, params: unknown[]): { text: string; values: unknown[] } {
+  let idx = 0;
+  const text = sql.replace(/\?/g, () => `$${++idx}`);
+  return { text, values: params };
+}
 
 export const query = {
   async get(sql: string, ...params: unknown[]): Promise<Record<string, unknown> | undefined> {
-    const db = await getDb();
-    const stmt = db.prepare(sql);
-    try {
-      if (params.length) stmt.bind(params as (string | number | null)[]);
-      if (stmt.step()) {
-        return stmt.getAsObject() as Record<string, unknown>;
-      }
-      return undefined;
-    } finally {
-      stmt.free();
-    }
+    const { text, values } = convertPlaceholders(sql, params);
+    const result = await pool.query(text, values);
+    return result.rows[0] as Record<string, unknown> | undefined;
   },
 
   async all(sql: string, ...params: unknown[]): Promise<Record<string, unknown>[]> {
-    const db = await getDb();
-    const stmt = db.prepare(sql);
-    try {
-      if (params.length) stmt.bind(params as (string | number | null)[]);
-      const rows: Record<string, unknown>[] = [];
-      while (stmt.step()) {
-        rows.push(stmt.getAsObject() as Record<string, unknown>);
-      }
-      return rows;
-    } finally {
-      stmt.free();
-    }
+    const { text, values } = convertPlaceholders(sql, params);
+    const result = await pool.query(text, values);
+    return result.rows as Record<string, unknown>[];
   },
 
   async run(sql: string, ...params: unknown[]): Promise<void> {
-    const db = await getDb();
-    // db.run() is sql.js shorthand: prepare + bind + step + free.
-    db.run(sql, (params.length ? params : []) as SqlValue[]);
+    const { text, values } = convertPlaceholders(sql, params);
+    await pool.query(text, values);
   },
 
   async exec(sql: string): Promise<void> {
-    const db = await getDb();
-    db.exec(sql);
-    saveDb();
+    await pool.query(sql);
   },
 
   async transaction<T>(fn: () => T | Promise<T>): Promise<T> {
-    const db = await getDb();
-    if (inTransaction) {
-      return await fn();
-    }
-    inTransaction = true;
-    db.exec('BEGIN');
+    const client = await pool.connect();
     try {
+      await client.query('BEGIN');
       const result = await fn();
-      db.exec('COMMIT');
-      saveDb();
+      await client.query('COMMIT');
       return result;
     } catch (err) {
-      db.exec('ROLLBACK');
+      await client.query('ROLLBACK');
       throw err;
     } finally {
-      inTransaction = false;
+      client.release();
     }
   },
 };

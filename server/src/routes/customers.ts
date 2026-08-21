@@ -1,4 +1,4 @@
-// routes/customers.ts — admin CRUD + search for customers.
+﻿// routes/customers.ts â€” admin CRUD + search for customers.
 // Staff/customer cannot access these endpoints (admin only).
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -102,7 +102,7 @@ customers.put('/:id', zValidator('json', customerUpdateSchema), async (c) => {
     values.push(v);
   }
   if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400);
-  fields.push(`updated_at = datetime('now')`);
+  fields.push(`updated_at = NOW()`);
   values.push(id);
 
   await query.run(`UPDATE customers SET ${fields.join(', ')} WHERE id = ?`, ...values);
@@ -121,3 +121,4 @@ customers.delete('/:id', async (c) => {
 });
 
 export default customers;
+

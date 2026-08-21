@@ -1,4 +1,4 @@
-// routes/invoices.ts — invoice generation + list + payment status.
+﻿// routes/invoices.ts â€” invoice generation + list + payment status.
 // admin/staff: generate, list all, update. customer: read own invoices only.
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -117,7 +117,7 @@ invoices.get('/:id', async (c) => {
   return c.json({ invoice: row, items, payments });
 });
 
-// POST /api/invoices — admin/staff
+// POST /api/invoices â€” admin/staff
 invoices.post('/', requireRole('admin', 'staff'), zValidator('json', invoiceSchema), async (c) => {
   const body = c.req.valid('json' as never) as z.infer<typeof invoiceSchema>;
 
@@ -163,7 +163,7 @@ invoices.post('/', requireRole('admin', 'staff'), zValidator('json', invoiceSche
   return c.json({ invoice: row }, 201);
 });
 
-// PUT /api/invoices/:id — admin/staff
+// PUT /api/invoices/:id â€” admin/staff
 invoices.put('/:id', requireRole('admin', 'staff'), zValidator('json', invoiceUpdateSchema), async (c) => {
   const id = c.req.param('id');
   const body = c.req.valid('json' as never) as z.infer<typeof invoiceUpdateSchema>;
@@ -193,7 +193,7 @@ invoices.put('/:id', requireRole('admin', 'staff'), zValidator('json', invoiceUp
     values.push(total);
   }
 
-  fields.push(`updated_at = datetime('now')`);
+  fields.push(`updated_at = NOW()`);
   values.push(id);
 
   await query.run(`UPDATE invoices SET ${fields.join(', ')} WHERE id = ?`, ...values);
@@ -201,7 +201,7 @@ invoices.put('/:id', requireRole('admin', 'staff'), zValidator('json', invoiceUp
   return c.json({ invoice: row });
 });
 
-// POST /api/invoices/:id/payments — record a payment
+// POST /api/invoices/:id/payments â€” record a payment
 invoices.post('/:id/payments', requireRole('admin', 'staff'), async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => ({})) as { amount?: number; method?: string };
@@ -228,7 +228,7 @@ invoices.post('/:id/payments', requireRole('admin', 'staff'), async (c) => {
     if (totalPaid >= invTotal) status = 'paid';
     else if (totalPaid > 0) status = 'partial';
     await query.run(
-      `UPDATE invoices SET payment_status = ?, updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE invoices SET payment_status = ?, updated_at = NOW() WHERE id = ?`,
       status, id,
     );
   });
@@ -238,3 +238,4 @@ invoices.post('/:id/payments', requireRole('admin', 'staff'), async (c) => {
 });
 
 export default invoices;
+

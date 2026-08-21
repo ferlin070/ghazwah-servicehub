@@ -13,7 +13,8 @@ export interface User {
 
 export interface AuthResponse {
   user: User;
-  token: string;
+  accessToken: string;
+  refreshToken: string;
 }
 
 export interface Customer {

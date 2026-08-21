@@ -38,7 +38,7 @@ function mockFetch(url: string, init?: RequestInit): Promise<Response> {
     return Promise.resolve({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ user: { id: '1', email: body.email, name: 'Test', role: 'admin' }, token: 'tok' }),
+      json: () => Promise.resolve({ user: { id: '1', email: body.email, name: 'Test', role: 'admin' }, accessToken: 'tok', refreshToken: 'rt' }),
     } as Response);
   }
   return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) } as Response);

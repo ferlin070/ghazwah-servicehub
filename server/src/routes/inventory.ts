@@ -1,4 +1,4 @@
-// routes/inventory.ts — spare parts inventory + low-stock warning.
+﻿// routes/inventory.ts â€” spare parts inventory + low-stock warning.
 // admin: full CRUD. staff: read + update quantities. customer: no access.
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -49,7 +49,7 @@ inventory.get('/:id', async (c) => {
   return c.json({ part: row });
 });
 
-// POST /api/inventory — admin only
+// POST /api/inventory â€” admin only
 inventory.post('/', requireRole('admin'), zValidator('json', partSchema), async (c) => {
   const body = c.req.valid('json' as never) as z.infer<typeof partSchema>;
 
@@ -68,7 +68,7 @@ inventory.post('/', requireRole('admin'), zValidator('json', partSchema), async 
   return c.json({ part: row }, 201);
 });
 
-// PUT /api/inventory/:id — admin full, staff quantity only
+// PUT /api/inventory/:id â€” admin full, staff quantity only
 inventory.put('/:id', zValidator('json', partUpdateSchema), async (c) => {
   const user = c.get('user')!;
   const id = c.req.param('id');
@@ -85,7 +85,7 @@ inventory.put('/:id', zValidator('json', partUpdateSchema), async (c) => {
     }
     if (allowed.quantity === undefined) return c.json({ error: 'No fields to update' }, 400);
     await query.run(
-      `UPDATE inventory SET quantity = ?, updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE inventory SET quantity = ?, updated_at = NOW() WHERE id = ?`,
       allowed.quantity, id,
     );
   } else {
@@ -96,7 +96,7 @@ inventory.put('/:id', zValidator('json', partUpdateSchema), async (c) => {
       values.push(v);
     }
     if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400);
-    fields.push(`updated_at = datetime('now')`);
+    fields.push(`updated_at = NOW()`);
     values.push(id);
     await query.run(`UPDATE inventory SET ${fields.join(', ')} WHERE id = ?`, ...values);
   }
@@ -105,7 +105,7 @@ inventory.put('/:id', zValidator('json', partUpdateSchema), async (c) => {
   return c.json({ part: row });
 });
 
-// DELETE /api/inventory/:id — admin only
+// DELETE /api/inventory/:id â€” admin only
 inventory.delete('/:id', requireRole('admin'), async (c) => {
   const id = c.req.param('id');
   const existing = await query.get('SELECT id FROM inventory WHERE id = ?', id);
@@ -116,3 +116,4 @@ inventory.delete('/:id', requireRole('admin'), async (c) => {
 });
 
 export default inventory;
+

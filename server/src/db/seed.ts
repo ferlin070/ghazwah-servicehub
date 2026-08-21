@@ -1,40 +1,28 @@
-﻿// seed.ts â€” inserts demo data: 1 admin, 2 staff, 5 customers, 8 devices,
-// 10 work orders, 15 inventory items, 5 invoices.
-// Idempotent: wipes all tables first (dev only â€” do NOT run in production).
-import { getDb, saveDb, closeDb } from './db.ts';
-import { query } from '../lib/query.ts';
+﻿// seed.ts — inserts demo data into PostgreSQL.
+// Requires DATABASE_URL env var. Idempotent: wipes all tables first (dev only).
+import { pool } from './db.ts';
 import { hashPassword } from '../lib/crypto.ts';
 import { randomId } from '../lib/id.ts';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = join(__dirname, '..', '..', 'migrations');
 
 async function main() {
-  const schema = readFileSync(join(MIGRATIONS_DIR, '001_init.sql'), 'utf8');
-  const db = await getDb();
-  db.exec(schema);
-
   // Wipe all (dev only, in dependency order)
-  const tables = ['payments', 'invoice_items', 'invoices', 'inventory', 'repair_timeline', 'work_orders', 'devices', 'customers', 'users'];
+  const tables = ['email_verification_tokens', 'file_uploads', 'audit_logs', 'refresh_tokens', 'payments', 'invoice_items', 'invoices', 'inventory', 'repair_timeline', 'work_orders', 'devices', 'customers', 'users'];
   for (const t of tables) {
-    await query.exec(`DELETE FROM ${t};`);
+    await pool.query(`DELETE FROM ${t};`);
   }
 
   const password = await hashPassword('Password123');
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Users + Customers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ──────── Users + Customers ────────
   const users = [
-    { email: 'admin@ghazwah.test', name: 'Admin Utama', role: 'admin', phone: '0123456789', address: 'HQ' },
-    { email: 'staff1@ghazwah.test', name: 'Staff Satu', role: 'staff', phone: '0111111111', address: 'Branch A' },
-    { email: 'staff2@ghazwah.test', name: 'Staff Dua', role: 'staff', phone: '0122222222', address: 'Branch B' },
-    { email: 'cust1@ghazwah.test', name: 'Ahmad Bin Ali', role: 'customer', phone: '0131111111', address: 'Kg. Bharu, KL' },
-    { email: 'cust2@ghazwah.test', name: 'Siti Aminah', role: 'customer', phone: '0132222222', address: 'PJ, Selangor' },
-    { email: 'cust3@ghazwah.test', name: 'Raj Kumar', role: 'customer', phone: '0133333333', address: 'Ipoh, Perak' },
-    { email: 'cust4@ghazwah.test', name: 'Lim Wei', role: 'customer', phone: '0134444444', address: 'JB, Johor' },
-    { email: 'cust5@ghazwah.test', name: 'Fatimah Zahra', role: 'customer', phone: '0135555555', address: 'Kuantan, Pahang' },
+    { email: 'admin@ghazwah.test', name: 'Admin Utama', role: 'admin', phone: '0123456789' },
+    { email: 'staff1@ghazwah.test', name: 'Staff Satu', role: 'staff', phone: '0111111111' },
+    { email: 'staff2@ghazwah.test', name: 'Staff Dua', role: 'staff', phone: '0122222222' },
+    { email: 'cust1@ghazwah.test', name: 'Ahmad Bin Ali', role: 'customer', phone: '0131111111' },
+    { email: 'cust2@ghazwah.test', name: 'Siti Aminah', role: 'customer', phone: '0132222222' },
+    { email: 'cust3@ghazwah.test', name: 'Raj Kumar', role: 'customer', phone: '0133333333' },
+    { email: 'cust4@ghazwah.test', name: 'Lim Wei', role: 'customer', phone: '0134444444' },
+    { email: 'cust5@ghazwah.test', name: 'Fatimah Zahra', role: 'customer', phone: '0135555555' },
   ];
 
   const userIds: Record<string, string> = {};
@@ -43,21 +31,21 @@ async function main() {
   for (const u of users) {
     const uid = randomId();
     userIds[u.email] = uid;
-    await query.run(
-      `INSERT INTO users (id, email, name, password, role, phone) VALUES (?, ?, ?, ?, ?, ?)`,
-      uid, u.email, u.name, password, u.role, u.phone,
+    await pool.query(
+      `INSERT INTO users (id, email, name, password, role, phone) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [uid, u.email, u.name, password, u.role, u.phone],
     );
     if (u.role === 'customer') {
       const cid = randomId();
       customerIds[u.email] = cid;
-      await query.run(
-        `INSERT INTO customers (id, user_id, name, phone, email, address) VALUES (?, ?, ?, ?, ?, ?)`,
-        cid, uid, u.name, u.phone, u.email, u.address,
+      await pool.query(
+        `INSERT INTO customers (id, user_id, name, phone, email) VALUES ($1, $2, $3, $4, $5)`,
+        [cid, uid, u.name, u.phone, u.email],
       );
     }
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Devices (8) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ──────── Devices (8) ────────
   const deviceData = [
     { cust: 'cust1@ghazwah.test', brand: 'Dell', model: 'Latitude 7420', serial: 'DL7420-001', type: 'laptop', condition: 'Good', accessories: 'Charger', notes: 'Screen flickering' },
     { cust: 'cust1@ghazwah.test', brand: 'HP', model: 'Pavilion 15', serial: 'HP15-002', type: 'laptop', condition: 'Fair', accessories: 'Bag', notes: 'Slow boot' },
@@ -74,14 +62,14 @@ async function main() {
     const did = randomId();
     const cid = customerIds[d.cust];
     deviceIds[d.serial] = did;
-    await query.run(
+    await pool.query(
       `INSERT INTO devices (id, customer_id, brand, model, serial_number, device_type, condition, accessories, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      did, cid, d.brand, d.model, d.serial, d.type, d.condition, d.accessories, d.notes,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [did, cid, d.brand, d.model, d.serial, d.type, d.condition, d.accessories, d.notes],
     );
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Work Orders (10) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ──────── Work Orders (10) ────────
   const woData = [
     { serial: 'DL7420-001', problem: 'Screen flickering when opening lid', diagnosis: 'Loose display cable', technician: 'staff1@ghazwah.test', priority: 'high', status: 'repairing', est: 250, final: 280 },
     { serial: 'HP15-002', problem: 'Slow boot, takes 5 minutes', diagnosis: 'Failing HDD', technician: 'staff2@ghazwah.test', priority: 'normal', status: 'waiting_approval', est: 200, final: null },
@@ -101,29 +89,37 @@ async function main() {
     const wid = randomId();
     woIds.push(wid);
     const did = deviceIds[w.serial];
-    const dev = await query.get('SELECT customer_id FROM devices WHERE id = ?', did);
-    const cid = dev?.customer_id as string;
+    const dev = await pool.query('SELECT customer_id FROM devices WHERE id = $1', [did]);
+    const cid = dev.rows[0]?.customer_id as string;
     const techId = userIds[w.technician];
     const orderNum = `WO-2026-${String(i + 1).padStart(4, '0')}`;
 
-    await query.run(
-      `INSERT INTO work_orders (id, order_number, customer_id, device_id, problem, diagnosis, technician_id, priority, status, estimated_cost, final_cost${w.status === 'completed' ? ', completed_date' : ''})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${w.status === 'completed' ? ", datetime('now')" : ''})`,
-      wid, orderNum, cid, did, w.problem, w.diagnosis, techId, w.priority, w.status, w.est, w.final,
-    );
+    if (w.status === 'completed') {
+      await pool.query(
+        `INSERT INTO work_orders (id, order_number, customer_id, device_id, problem, diagnosis, technician_id, priority, status, estimated_cost, final_cost, completed_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+        [wid, orderNum, cid, did, w.problem, w.diagnosis, techId, w.priority, w.status, w.est, w.final],
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO work_orders (id, order_number, customer_id, device_id, problem, diagnosis, technician_id, priority, status, estimated_cost, final_cost)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [wid, orderNum, cid, did, w.problem, w.diagnosis, techId, w.priority, w.status, w.est, w.final],
+      );
+    }
 
-    // Add timeline events for each work order
+    // Add timeline events
     const events = getEventsForStatus(w.status);
     for (const ev of events) {
       const tlId = randomId();
-      await query.run(
-        `INSERT INTO repair_timeline (id, work_order_id, event, actor_id, description) VALUES (?, ?, ?, ?, ?)`,
-        tlId, wid, ev.event, techId, ev.desc,
+      await pool.query(
+        `INSERT INTO repair_timeline (id, work_order_id, event, actor_id, description) VALUES ($1, $2, $3, $4, $5)`,
+        [tlId, wid, ev.event, techId, ev.desc],
       );
     }
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Inventory (15) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ──────── Inventory (15) ────────
   const parts = [
     { name: 'SSD 512GB Samsung', sku: 'SSD-512-001', cat: 'Storage', qty: 12, min: 5, cost: 45, price: 80, supplier: 'TechSupplier' },
     { name: 'SSD 1TB WD Blue', sku: 'SSD-1TB-002', cat: 'Storage', qty: 3, min: 5, cost: 70, price: 120, supplier: 'TechSupplier' },
@@ -142,74 +138,54 @@ async function main() {
     { name: 'Power Adapter 65W USB-C', sku: 'PWR-65W-001', cat: 'Power', qty: 10, min: 5, cost: 18, price: 40, supplier: 'PowerCo' },
   ];
 
-  const partIds: Record<string, string> = {};
   for (const p of parts) {
     const pid = randomId();
-    partIds[p.sku] = pid;
-    await query.run(
+    await pool.query(
       `INSERT INTO inventory (id, part_name, sku, category, quantity, min_stock, cost, selling_price, supplier)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      pid, p.name, p.sku, p.cat, p.qty, p.min, p.cost, p.price, p.supplier,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [pid, p.name, p.sku, p.cat, p.qty, p.min, p.cost, p.price, p.supplier],
     );
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Invoices (5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ──────── Invoices (2 from completed work orders) ────────
   const completedWOs = woData
     .map((w, i) => ({ ...w, id: woIds[i] }))
     .filter((w) => w.status === 'completed');
 
-  for (let i = 0; i < Math.min(5, completedWOs.length); i++) {
+  for (let i = 0; i < Math.min(2, completedWOs.length); i++) {
     const w = completedWOs[i]!;
     const invId = randomId();
     const invNum = `INV-2026-${String(i + 1).padStart(4, '0')}`;
-    const dev = await query.get('SELECT customer_id FROM devices WHERE id = ?', deviceIds[w.serial]);
-    const cid = dev?.customer_id as string;
+    const dev = await pool.query('SELECT customer_id FROM devices WHERE id = $1', [deviceIds[w.serial]]);
+    const cid = dev.rows[0]?.customer_id as string;
     const labour = 50 + i * 20;
     const partsTotal = 30 + i * 15;
     const discount = i === 0 ? 10 : 0;
     const tax = Math.round((partsTotal + labour - discount) * 0.06 * 100) / 100;
     const total = partsTotal + labour - discount + tax;
 
-    // Pick a random part for invoice item
-    const skuKeys = Object.keys(partIds);
-    const partSku = skuKeys[i % skuKeys.length]!;
-    const partId = partIds[partSku];
-    const partInfo = parts.find((p) => p.sku === partSku)!;
+    await pool.query(
+      `INSERT INTO invoices (id, invoice_number, customer_id, work_order_id, repair_description, labour, discount, tax, total, payment_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [invId, invNum, cid, w.id, `Repair: ${w.problem}`, labour, discount, tax, total, i < 1 ? 'paid' : 'partial'],
+    );
 
-    await query.transaction(async () => {
-      await query.run(
-        `INSERT INTO invoices (id, invoice_number, customer_id, work_order_id, repair_description, labour, discount, tax, total, payment_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        invId, invNum, cid, w.id, `Repair: ${w.problem}`, labour, discount, tax, total, i < 2 ? 'paid' : i < 4 ? 'partial' : 'unpaid',
-      );
-
-      const itemId = randomId();
-      await query.run(
-        `INSERT INTO invoice_items (id, invoice_id, inventory_id, description, quantity, unit_price, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        itemId, invId, partId, partInfo.name, 1, partInfo.price, partInfo.price,
-      );
-
-      // Add a payment if paid or partial
-      if (i < 4) {
-        const payId = randomId();
-        const payAmount = i < 2 ? total : Math.round(total * 0.5 * 100) / 100;
-        await query.run(
-          `INSERT INTO payments (id, invoice_id, amount, method) VALUES (?, ?, ?, ?)`,
-          payId, invId, payAmount, i % 2 === 0 ? 'cash' : 'transfer',
-        );
-      }
-    });
+    // Add payment
+    const payId = randomId();
+    const payAmount = i < 1 ? total : Math.round(total * 0.5 * 100) / 100;
+    await pool.query(
+      `INSERT INTO payments (id, invoice_id, amount, method) VALUES ($1, $2, $3, $4)`,
+      [payId, invId, payAmount, i % 2 === 0 ? 'cash' : 'transfer'],
+    );
   }
 
-  saveDb();
-  console.log('  [seed] âœ… inserted:');
+  await pool.end();
+  console.log('  [seed] inserted:');
   console.log('         1 admin, 2 staff, 5 customers (8 users)');
   console.log('         8 devices, 10 work orders (+timeline events)');
   console.log('         15 inventory items (some below min stock)');
-  console.log('         5 invoices (with items + payments)');
+  console.log('         2 invoices (with items + payments)');
   console.log('         demo password for all: Password123');
-  closeDb();
 }
 
 function getEventsForStatus(status: string): { event: string; desc: string }[] {
@@ -230,4 +206,3 @@ function getEventsForStatus(status: string): { event: string; desc: string }[] {
 }
 
 main();
-

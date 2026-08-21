@@ -1,7 +1,7 @@
 // middleware/auth.ts — extracts Bearer token, verifies, sets ctx.user.
 // requireRole(...allowed) — authorization gate after authentication.
 import type { Context, Next } from 'hono';
-import { verifyToken } from '../lib/crypto.ts';
+import { verifyAccessToken } from '../lib/crypto.ts';
 
 // Augment Hono context with our user type.
 type AppContext = {
@@ -15,7 +15,7 @@ export const authenticate = async (c: Context<AppContext>, next: Next) => {
   const header = c.req.header('Authorization') ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(header);
   if (match) {
-    const decoded = await verifyToken(match[1] ?? '');
+    const decoded = await verifyAccessToken(match[1] ?? '');
     if (decoded) c.set('user', decoded);
   }
   await next();

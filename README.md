@@ -1,25 +1,28 @@
 # Ghazwah ServiceHub
 
-SaaS web app untuk pengurusan syarikat servis komputer/laptop. Full-stack: Hono API + SQLite (sql.js WASM) + React frontend.
+SaaS web app untuk pengurusan syarikat servis komputer/laptop. Full-stack: Hono API + PostgreSQL + React frontend.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
-│                  Frontend                     │
+│               Frontend                       │
 │  React 18 + Vite + Tailwind CSS              │
 │  Port 5173 (dev) → proxies /api to :3000     │
 ├─────────────────────────────────────────────┤
-│                   API                         │
+│                 API                          │
 │  Hono (TypeScript) + zod validation          │
-│  Port 3000                                    │
-│  JWT auth (jose) + bcrypt password hash       │
+│  Port 3000                                   │
+│  JWT auth (15min access + 7d refresh)        │
 │  Role middleware (admin/staff/customer)       │
+│  SSE real-time updates                       │
+│  File upload (local storage)                 │
+│  Audit logging                               │
 ├─────────────────────────────────────────────┤
-│                 Database                       │
-│  SQLite via sql.js (WASM, no native build)    │
-│  9 tables with foreign keys                   │
-│  File persistence: server/data/app.db         │
+│               Database                       │
+│  PostgreSQL 16                               │
+│  13 tables with foreign keys + indexes       │
+│  Refresh tokens, audit logs, file uploads    │
 └─────────────────────────────────────────────┘
 ```
 
@@ -28,115 +31,201 @@ SaaS web app untuk pengurusan syarikat servis komputer/laptop. Full-stack: Hono 
 | Layer | Technology |
 |-------|-----------|
 | Backend | Hono 4 + @hono/node-server |
-| Database | sql.js (SQLite compiled to WASM) |
-| Auth | bcryptjs (password hash) + jose (JWT) |
+| Database | PostgreSQL 16 (via node-postgres) |
+| Auth | bcryptjs (password hash) + jose (JWT HS256) |
+| Tokens | Access token (15min) + Refresh token (7d rotation) |
 | Validation | zod + @hono/zod-validator |
 | Frontend | React 18 + react-router-dom 6 |
 | Build | Vite 5 + TypeScript 5.6 (strict) |
 | Styling | Tailwind CSS 3 |
+| Real-time | Server-Sent Events (SSE) |
+| Upload | Local file storage (S3-ready) |
+| Docker | Multi-stage build + docker-compose |
 
-## Installation
+## Prerequisites
 
-### Prerequisites
 - Node.js 20+
+- PostgreSQL 16+ (or use Docker)
 - npm
 
-### Setup
+## Quick Start (Docker)
 
 ```bash
-# Clone
 git clone <repo-url> ghazwah-servicehub
 cd ghazwah-servicehub
-
-# Install backend dependencies
-npm install
-
-# Install frontend dependencies
-cd client
-npm install
-cd ..
+docker compose up
+# App runs at http://localhost:3000
+# PostgreSQL at localhost:5432
 ```
 
-## Environment Variables
+## Manual Setup
 
-Create `.env` in the project root (optional — defaults work for development):
+### 1. Install dependencies
+
+```bash
+npm install
+cd client && npm install && cd ..
+```
+
+### 2. Configure environment
+
+Create `.env` in project root:
 
 ```env
-PORT=3000                        # API port
-CORS_ORIGIN=http://localhost:5173 # Frontend URL
-JWT_SECRET=your-secret-here      # JWT signing secret (CHANGE IN PRODUCTION)
-DB_PATH=server/data/app.db       # SQLite file path (optional)
+DATABASE_URL=postgresql://localhost:5432/ghazwah
+JWT_SECRET=your-production-secret-here
+PORT=3000
+CORS_ORIGIN=http://localhost:5173
 ```
 
-**Never commit `.env` to git.** The `.gitignore` already excludes it.
+**`JWT_SECRET` is required.** The server will not start without it.
 
-## Database Setup
+### 3. Create PostgreSQL database
 
-### Migration
+```bash
+createdb ghazwah
+```
 
-Run the SQL migration to create all 9 tables + indexes:
+### 4. Run migrations
 
 ```bash
 npm run migrate
 ```
 
-This creates `server/data/app.db` with:
-- `users` — admin/staff/customer accounts (password hashed)
-- `customers` — customer profiles (linked to users)
-- `devices` — customer devices (brand, model, serial, type)
-- `work_orders` — repair jobs (status flow: received → completed)
-- `repair_timeline` — per-work-order event log
-- `inventory` — spare parts (with min-stock warning)
-- `invoices` — billing (labour, discount, tax, total)
-- `invoice_items` — line items per invoice
-- `payments` — payment records (auto-updates invoice status)
+Creates 13 tables:
+- `users`, `customers`, `devices`, `work_orders`, `repair_timeline`
+- `inventory`, `invoices`, `invoice_items`, `payments`
+- `refresh_tokens`, `audit_logs`, `file_uploads`, `email_verification_tokens`
 
-All tables have proper foreign keys. Migration is idempotent (`CREATE TABLE IF NOT EXISTS`).
-
-### Seed
-
-Insert demo data (1 admin, 2 staff, 5 customers, 8 devices, 10 work orders, 15 inventory items, 5 invoices):
+### 5. Seed demo data
 
 ```bash
 npm run seed
 ```
 
-**Warning:** Seed wipes all existing data first (dev only).
+Inserts: 1 admin, 2 staff, 5 customers, 8 devices, 10 work orders, 15 inventory items, 2 invoices.
 
-## Running the Development Server
-
-```bash
-# Terminal 1: Backend API (port 3000)
-npm run dev
-
-# Terminal 2: Frontend (port 5173)
-cd client
-npm run dev
-```
-
-Open `http://localhost:5173` in your browser. The Vite dev server proxies `/api` requests to the backend automatically.
-
-## Production Build
+### 6. Start development servers
 
 ```bash
-# Build frontend
-cd client
-npm run build
-# Output: client/dist/ (static files)
+# Terminal 1: Backend
+npm run dev
 
-# Build backend
-cd ..
-npm run build
-# Output: server/dist/ (compiled JS)
-
-# Start production server
-npm start
-# Serves API on port 3000
+# Terminal 2: Frontend
+cd client && npm run dev
 ```
 
-For production, serve `client/dist/` with nginx or a static host, pointing `/api` to the backend.
+Open `http://localhost:5173`.
+
+## Demo Credentials
+
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | admin@ghazwah.test | Password123 |
+| Staff | staff1@ghazwah.test | Password123 |
+| Customer | cust1@ghazwah.test | Password123 |
+
+## Security Features
+
+- **JWT authentication** — Access tokens (15min) + Refresh tokens (7d with rotation)
+- **Password hashing** — bcryptjs (10 rounds), never stored in plaintext
+- **Role authorization** — `requireRole()` middleware on every protected route
+- **Public registration** — Only `customer` role allowed; admin/staff created by admin only
+- **JWT_SECRET mandatory** — Server refuses to start without it
+- **Rate limiting** — Login: 5 attempts per 60s per IP → 429
+- **Password complexity** — 8+ chars, uppercase, lowercase, number
+- **Refresh token revocation** — Logout invalidates refresh token
+- **Customer isolation** — Customers can only access their own data
+- **Staff isolation** — Staff can only modify assigned work orders
+- **Input validation** — zod schema on every POST/PUT
+- **No password in API responses** — Verified by tests
+- **FK error handling** — Friendly 409 messages on constraint violations
+- **Audit logging** — All mutations logged to `audit_logs` table
+
+## API Reference
+
+### Auth
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/api/auth/register` | — | Register (customer only) |
+| POST | `/api/auth/admin-register` | admin | Create admin/staff accounts |
+| POST | `/api/auth/login` | — | Login, returns access + refresh tokens |
+| POST | `/api/auth/refresh` | — | Refresh access token |
+| POST | `/api/auth/logout` | — | Revoke refresh token |
+| GET | `/api/auth/me` | ✓ | Current user profile |
+
+### Real-time (SSE)
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/events` | ✓ | SSE stream for real-time updates |
+
+### File Upload
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/api/uploads` | admin/staff | Upload file (image/PDF, max 10MB) |
+| GET | `/api/uploads/:type` | ✓ | List files by entity type |
+| GET | `/api/uploads/:type/:filename` | ✓ | Serve uploaded file |
+
+### Customers (admin only)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/customers?q=&page=&limit=` | List + search + pagination |
+| GET | `/api/customers/:id` | Get one |
+| POST | `/api/customers` | Create |
+| PUT | `/api/customers/:id` | Update |
+| DELETE | `/api/customers/:id` | Delete |
+
+### Devices (admin/staff write, customer read own)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/devices?customerId=&q=&page=&limit=` | List (role-scoped) |
+| GET | `/api/devices/:id` | Get one |
+| POST | `/api/devices` | Create (admin/staff) |
+| PUT | `/api/devices/:id` | Update (admin/staff) |
+| DELETE | `/api/devices/:id` | Delete (admin only) |
+
+### Work Orders (admin/staff write, customer read own)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/work-orders?status=&customerId=&page=&limit=` | List (role-scoped) |
+| GET | `/api/work-orders/:id` | Get one |
+| POST | `/api/work-orders` | Create (auto order number) |
+| PUT | `/api/work-orders/:id` | Update (status flow enforced, SSE broadcast) |
+| DELETE | `/api/work-orders/:id` | Delete (admin only) |
+
+### Repair Timeline
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/work-orders/:woId/timeline` | List events |
+| POST | `/api/work-orders/:woId/timeline` | Add event (admin/staff) |
+
+### Inventory (admin full, staff qty only)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/inventory?lowStock=true&page=&limit=` | List + low-stock filter |
+| GET | `/api/inventory/:id` | Get one |
+| POST | `/api/inventory` | Create (admin) |
+| PUT | `/api/inventory/:id` | Update (admin full, staff qty) |
+| DELETE | `/api/inventory/:id` | Delete (admin) |
+
+### Invoices (admin/staff write, customer read own)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/invoices?customerId=&status=&page=&limit=` | List (role-scoped) |
+| GET | `/api/invoices/:id` | Detail (items + payments) |
+| POST | `/api/invoices` | Generate (auto invoice number) |
+| PUT | `/api/invoices/:id` | Update |
+| POST | `/api/invoices/:id/payments` | Record payment (auto-update status) |
+
+### Search & Dashboard
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/search?q=` | Global search (role-scoped) |
+| GET | `/api/dashboard` | Role-based dashboard stats |
 
 ## Testing
+
+Requires a running PostgreSQL instance. Tests use a separate `ghazwah_test` database.
 
 ```bash
 # Run all backend tests
@@ -153,196 +242,107 @@ npm run typecheck
 
 | Test File | Tests | What |
 |-----------|-------|------|
-| `auth.test.ts` | 10 | Register, login, /me, duplicate email, wrong password, no-hash-leak, role authorization (admin 200, customer 403, unauth 401) |
-| `customers.test.ts` | 9 | CRUD, search, role auth (staff 403, customer 403), invalid email validation |
-| `workOrders.test.ts` | 9 | Create, list (role-scoped), status update, status revert prevention, timeline, device-customer mismatch, non-existent customer |
-| `invoices.test.ts` | 7 | Generate (with items + total calc), list, detail (items + payments), partial payment → paid, invalid customer |
+| `auth.test.ts` | 12 | Register, login, /me, refresh tokens, token revocation, role authorization |
+| `customers.test.ts` | 9 | CRUD, search, role auth, validation |
+| `workOrders.test.ts` | 9 | Create, list, status update, timeline, device-customer mismatch |
+| `invoices.test.ts` | 7 | Generate, list, detail, payment flow, validation |
 
-Total: **35 tests, all passing.**
+Total: **37 backend tests + 5 client tests = 42 tests.**
 
-## Demo Credentials
-
-After running `npm run seed`:
-
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@ghazwah.test | Password123 |
-| Staff | staff1@ghazwah.test | Password123 |
-| Staff | staff2@ghazwah.test | Password123 |
-| Customer | cust1@ghazwah.test | Password123 |
-| Customer | cust2@ghazwah.test | Password123 |
-| Customer | cust3@ghazwah.test | Password123 |
-| Customer | cust4@ghazwah.test | Password123 |
-| Customer | cust5@ghazwah.test | Password123 |
-
-## API Reference
-
-### Auth
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/api/auth/register` | — | Register (admin/staff/customer) |
-| POST | `/api/auth/login` | — | Login, returns JWT |
-| GET | `/api/auth/me` | ✓ | Current user profile |
-
-### Customers (admin only)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/customers?q=` | List + search |
-| GET | `/api/customers/:id` | Get one |
-| POST | `/api/customers` | Create |
-| PUT | `/api/customers/:id` | Update |
-| DELETE | `/api/customers/:id` | Delete |
-
-### Devices (admin/staff write, customer read own)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/devices?customerId=&q=` | List (customer: own only) |
-| GET | `/api/devices/:id` | Get one |
-| POST | `/api/devices` | Create (admin/staff) |
-| PUT | `/api/devices/:id` | Update (admin/staff) |
-| DELETE | `/api/devices/:id` | Delete (admin only) |
-
-### Work Orders (admin/staff write, customer read own)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/work-orders?status=&customerId=` | List (role-scoped) |
-| GET | `/api/work-orders/:id` | Get one |
-| POST | `/api/work-orders` | Create (auto order number + first timeline event) |
-| PUT | `/api/work-orders/:id` | Update (status flow enforced, auto timeline) |
-| DELETE | `/api/work-orders/:id` | Delete (admin only) |
-
-### Repair Timeline
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/work-orders/:woId/timeline` | List events |
-| POST | `/api/work-orders/:woId/timeline` | Add event (admin/staff) |
-
-### Inventory (admin full, staff qty only)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/inventory?lowStock=true` | List + low-stock filter |
-| GET | `/api/inventory/:id` | Get one |
-| POST | `/api/inventory` | Create (admin) |
-| PUT | `/api/inventory/:id` | Update (admin full, staff qty) |
-| DELETE | `/api/inventory/:id` | Delete (admin) |
-
-### Invoices (admin/staff write, customer read own)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/invoices?customerId=&status=` | List (role-scoped) |
-| GET | `/api/invoices/:id` | Detail (items + payments) |
-| POST | `/api/invoices` | Generate (auto invoice number, total calc) |
-| PUT | `/api/invoices/:id` | Update |
-| POST | `/api/invoices/:id/payments` | Record payment (auto-update status) |
-
-### Search & Dashboard
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/search?q=` | Global search (role-scoped) |
-| GET | `/api/dashboard` | Role-based dashboard stats |
-
-## Security
-
-- **Password hashing:** bcryptjs (10 rounds) — passwords never stored in plaintext
-- **JWT auth:** HS256, 7-day expiry, Bearer token
-- **Role authorization:** `requireRole()` middleware on every protected route
-- **Customer isolation:** customers can only access their own data (work orders, invoices, devices)
-- **Staff isolation:** staff can only modify work orders assigned to them
-- **Input validation:** zod schema on every POST/PUT
-- **No password/hash in API responses:** verified by test
-- **Foreign keys enforced:** `PRAGMA foreign_keys = ON`
-- **CORS:** configurable origin (default localhost:5173)
-
-## Final Folder Structure
+## Folder Structure
 
 ```
 ghazwah-servicehub/
-├── package.json                 # Backend deps + scripts
-├── tsconfig.json                # Backend TS config (strict)
-├── .gitignore
-├── .env                         # (gitignored, create your own)
-│
+├── package.json
+├── tsconfig.json
+├── Dockerfile                 # Multi-stage build
+├── docker-compose.yml         # PostgreSQL + app
+├── .env                       # (gitignored)
 ├── server/
 │   ├── vitest.config.ts
 │   ├── migrations/
-│   │   └── 001_init.sql         # 9 tables + FK + indexes
+│   │   └── 001_init.sql       # 13 tables + FK + indexes
 │   ├── src/
-│   │   ├── index.ts             # Hono app entry (mounts all routes)
+│   │   ├── index.ts           # Hono app entry
 │   │   ├── db/
-│   │   │   ├── db.ts            # sql.js connection + file persistence
-│   │   │   ├── migrate.ts       # Migration runner
-│   │   │   └── seed.ts          # Demo data seeder
+│   │   │   ├── db.ts          # PostgreSQL connection pool
+│   │   │   ├── migrate.ts     # Migration runner
+│   │   │   └── seed.ts        # Demo data seeder
 │   │   ├── routes/
-│   │   │   ├── auth.ts          # register/login/me/admin-only
-│   │   │   ├── customers.ts     # CRUD + search (admin)
-│   │   │   ├── devices.ts       # CRUD (admin/staff, customer read own)
-│   │   │   ├── workOrders.ts    # CRUD + status flow (admin/staff)
-│   │   │   ├── timeline.ts      # repair timeline events
-│   │   │   ├── inventory.ts     # CRUD + low-stock (admin full, staff qty)
-│   │   │   ├── invoices.ts      # generate + payments (admin/staff)
-│   │   │   ├── search.ts        # global search (role-scoped)
-│   │   │   └── dashboard.ts     # role-based dashboard stats
+│   │   │   ├── auth.ts        # register/login/refresh/logout/me
+│   │   │   ├── customers.ts   # CRUD + search + pagination
+│   │   │   ├── devices.ts     # CRUD + pagination
+│   │   │   ├── workOrders.ts  # CRUD + status flow + SSE
+│   │   │   ├── timeline.ts    # repair timeline events
+│   │   │   ├── inventory.ts   # CRUD + low-stock + pagination
+│   │   │   ├── invoices.ts    # generate + payments + pagination
+│   │   │   ├── search.ts      # global search
+│   │   │   ├── dashboard.ts   # role-based stats
+│   │   │   └── uploads.ts     # file upload (local storage)
 │   │   ├── middleware/
-│   │   │   └── auth.ts          # authenticate + requireRole
+│   │   │   ├── auth.ts        # authenticate + requireRole
+│   │   │   ├── audit.ts       # audit logging middleware
+│   │   │   ├── errorHandler.ts # PG error codes → friendly messages
+│   │   │   └── rateLimit.ts   # IP-based rate limiting
 │   │   └── lib/
-│   │       ├── crypto.ts        # bcrypt hash + JWT sign/verify
-│   │       ├── id.ts            # randomUUID
-│   │       └── query.ts         # sql.js wrapper (get/all/run/exec/transaction)
+│   │       ├── crypto.ts      # bcrypt + JWT (access + refresh)
+│   │       ├── id.ts          # randomUUID
+│   │       ├── query.ts       # PostgreSQL query helpers (? → $N)
+│   │       ├── pagination.ts  # parsePagination + makeMeta
+│   │       └── sse.ts         # Server-Sent Events manager
 │   └── tests/
-│       ├── helpers.ts           # shared test app builder
-│       ├── auth.test.ts         # 10 tests
-│       ├── customers.test.ts    # 9 tests
-│       ├── workOrders.test.ts   # 9 tests
-│       └── invoices.test.ts     # 7 tests
-│
+│       ├── helpers.ts
+│       ├── auth.test.ts
+│       ├── customers.test.ts
+│       ├── workOrders.test.ts
+│       └── invoices.test.ts
 ├── client/
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts           # Vite + proxy /api → :3000
-│   ├── tailwind.config.js
-│   ├── postcss.config.js
-│   ├── index.html
-│   ├── dist/                    # (build output, gitignored)
-│   └── src/
-│       ├── main.tsx
-│       ├── App.tsx              # Router + AuthProvider + ToastProvider
-│       ├── index.css            # Tailwind + component classes
-│       ├── lib/
-│       │   ├── api.ts           # fetch wrapper + JWT + error handling
-│       │   ├── types.ts         # all API types
-│       │   ├── auth.tsx         # AuthContext (login/register/logout)
-│       │   └── toast.tsx        # ToastContext (success/error)
-│       ├── components/
-│       │   ├── Layout.tsx       # Sidebar + Topbar (role-based nav)
-│       │   └── ui.tsx           # Modal, ConfirmDialog, Loading, EmptyState, StatusBadge
-│       └── pages/
-│           ├── Login.tsx        # Login + Register tabs
-│           ├── Dashboard.tsx    # 3-role dashboard views
-│           ├── Customers.tsx    # Table + CRUD modal + search
-│           ├── Devices.tsx      # Table + CRUD modal
-│           ├── WorkOrders.tsx   # Table + detail + status + timeline
-│           ├── Inventory.tsx    # Table + low-stock + CRUD
-│           ├── Invoices.tsx     # List + detail + payment
-│           └── Search.tsx       # Global search
-│
-└── data/                        # (gitignored)
-    └── app.db                   # SQLite database file
+│   ├── src/
+│   │   ├── lib/
+│   │   │   ├── api.ts         # fetch + refresh token flow
+│   │   │   ├── auth.tsx       # AuthContext (access + refresh tokens)
+│   │   │   └── types.ts
+│   │   ├── components/
+│   │   │   ├── Layout.tsx
+│   │   │   └── ui.tsx         # Modal, Pagination, StatusBadge, etc.
+│   │   └── pages/
+│   │       ├── Login.tsx
+│   │       ├── Dashboard.tsx
+│   │       ├── Customers.tsx  # Pagination UI
+│   │       ├── Devices.tsx
+│   │       ├── WorkOrders.tsx
+│   │       ├── Inventory.tsx
+│   │       ├── Invoices.tsx
+│   │       └── Search.tsx
+│   └── dist/                  # (build output)
+└── data/                      # (gitignored, local uploads)
 ```
 
-## What Is NOT Production-Ready (Honest Assessment)
+## What's Production-Ready
 
-1. **JWT secret** — defaults to `dev-secret-change-me-in-production`. Must set `JWT_SECRET` env var.
-2. **CORS** — defaults to `localhost:5173`. Must set `CORS_ORIGIN` for production domain.
-3. **sql.js performance** — WASM SQLite is fine for dev/small apps. For production scale, use Postgres or native SQLite (better-sqlite3 on Linux).
-4. ~~Rate limiting~~ — **DONE.** Login endpoint limited to 5 attempts per 60s per IP (returns 429 with `Retry-After` header). Skipped in test env.
-5. ~~Refresh tokens~~ — Still only access tokens (7-day expiry). No refresh token or revocation mechanism.
-6. ~~Email verification~~ — Still no email verification step.
-7. ~~Client-side tests~~ — **DONE.** 5 React Testing Library tests (Login form render, demo credentials, register toggle, API call on submit, error toast on failed login).
-8. ~~Pagination~~ — **DONE.** Customers list supports `?page=2&limit=20` with pagination metadata (total, totalPages). Other list endpoints follow the same pattern.
-9. **No file upload** — invoice PDFs, device photos not supported.
-10. **No WebSocket** — repair timeline updates require page refresh (brief says "real-time"; this is near-real-time via polling, not true WebSocket push).
-11. **No HTTPS** — dev server is HTTP only. Production must use HTTPS (nginx/Cloudflare).
-12. ~~Password complexity~~ — **DONE.** Password must be 8+ chars with uppercase, lowercase, and number (zod regex validation on register).
-13. **No audit log** — timeline events exist for work orders, but no general audit log for admin actions (user create/delete, etc).
-14. ~~Delete error friendly~~ — **DONE.** Global error handler catches FK violations (SQLite error 19) and returns 409 with friendly message "Cannot delete: this record is referenced by other records."
-15. ~~No Docker~~ — **DONE.** Multi-stage Dockerfile + docker-compose.yml. `docker compose up` builds, runs migration, and serves on :3000 with persistent volume.
+| Item | Status |
+|------|--------|
+| PostgreSQL database | ✅ |
+| JWT with refresh tokens | ✅ |
+| JWT_SECRET mandatory | ✅ |
+| Role-based access control | ✅ |
+| Public registration (customer only) | ✅ |
+| Rate limiting (login) | ✅ |
+| Password complexity | ✅ |
+| FK error handling (friendly 409) | ✅ |
+| Pagination (all list endpoints) | ✅ |
+| Docker support | ✅ |
+| Real-time updates (SSE) | ✅ |
+| File upload | ✅ |
+| Audit logging | ✅ |
+| Client tests | ✅ |
+
+## Remaining for Enterprise
+
+1. Email verification flow
+2. S3/MinIO for file storage (currently local)
+3. HTTPS (nginx/Cloudflare)
+4. Refresh token blacklisting via Redis (currently DB-based)
+5. Webhook integrations
+6. Multi-tenancy
+7. Automated backups

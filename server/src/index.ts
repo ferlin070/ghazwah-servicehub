@@ -16,6 +16,8 @@ import inventory from './routes/inventory.ts';
 import invoices from './routes/invoices.ts';
 import search from './routes/search.ts';
 import dashboard from './routes/dashboard.ts';
+import uploads from './routes/uploads.ts';
+import { sseManager } from './lib/sse.ts';
 import { authenticate } from './middleware/auth.ts';
 import { errorHandler } from './middleware/errorHandler.ts';
 
@@ -38,6 +40,21 @@ app.use('*', authenticate);
 
 app.get('/health', (c) => c.json({ status: 'ok', time: new Date().toISOString() }));
 
+// SSE endpoint for real-time updates
+app.get('/api/events', (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Authentication required' }, 401);
+
+  const stream = sseManager.createStream(user.userId);
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+});
+
 app.route('/api/auth', auth);
 app.route('/api/customers', customers);
 app.route('/api/devices', devices);
@@ -47,6 +64,7 @@ app.route('/api/inventory', inventory);
 app.route('/api/invoices', invoices);
 app.route('/api/search', search);
 app.route('/api/dashboard', dashboard);
+app.route('/api/uploads', uploads);
 
 app.onError(errorHandler);
 
@@ -72,4 +90,5 @@ serve({ fetch: app.fetch, port }, (info) => {
   console.log(`           /health, /api/auth, /api/customers, /api/devices`);
   console.log(`           /api/work-orders, /api/work-orders/:id/timeline`);
   console.log(`           /api/inventory, /api/invoices, /api/search, /api/dashboard`);
+  console.log(`           /api/uploads, /api/events (SSE)`);
 });

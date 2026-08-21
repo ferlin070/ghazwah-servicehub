@@ -1,4 +1,4 @@
-﻿// auth.test.ts â€” auth + role authorization tests.
+﻿// auth.test.ts — auth + role authorization tests.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from './helpers.ts';
 import { query } from '../src/lib/query.ts';
@@ -33,15 +33,16 @@ async function api(path: string, init?: RequestInit & { token?: string }): Promi
 }
 
 describe('auth', () => {
-  it('registers a new customer and returns a token', async () => {
+  it('registers a new customer and returns tokens', async () => {
     const res = await api('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email: 'newcustomer@ghazwah.test', name: 'New Customer', password: 'Newpass123' }),
     });
     expect(res.status).toBe(201);
-    const data = (await res.json()) as { user: { role: string }; token: string };
+    const data = (await res.json()) as { user: { role: string }; accessToken: string; refreshToken: string };
     expect(data.user.role).toBe('customer');
-    expect(data.token).toBeTruthy();
+    expect(data.accessToken).toBeTruthy();
+    expect(data.refreshToken).toBeTruthy();
     const cRow = await query.get('SELECT name FROM customers WHERE name = ?', 'New Customer');
     expect(cRow).toBeTruthy();
   });
@@ -60,9 +61,10 @@ describe('auth', () => {
       body: JSON.stringify({ email: 'testadmin@ghazwah.test', password: 'Testpass123' }),
     });
     expect(res.status).toBe(200);
-    const data = (await res.json()) as { user: { email: string }; token: string };
+    const data = (await res.json()) as { user: { email: string }; accessToken: string; refreshToken: string };
     expect(data.user.email).toBe('testadmin@ghazwah.test');
-    expect(data.token).toBeTruthy();
+    expect(data.accessToken).toBeTruthy();
+    expect(data.refreshToken).toBeTruthy();
   });
 
   it('rejects wrong password', async () => {
@@ -78,8 +80,8 @@ describe('auth', () => {
       method: 'POST',
       body: JSON.stringify({ email: 'testadmin@ghazwah.test', password: 'Testpass123' }),
     });
-    const { token } = (await login.json()) as { token: string };
-    const res = await api('/api/auth/me', { token });
+    const { accessToken } = (await login.json()) as { accessToken: string };
+    const res = await api('/api/auth/me', { token: accessToken });
     expect(res.status).toBe(200);
     const data = (await res.json()) as { user: { email: string; role: string } };
     expect(data.user.email).toBe('testadmin@ghazwah.test');
@@ -88,6 +90,41 @@ describe('auth', () => {
 
   it('GET /me rejects no token', async () => {
     const res = await api('/api/auth/me');
+    expect(res.status).toBe(401);
+  });
+
+  it('refresh token returns new access token', async () => {
+    const login = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'testadmin@ghazwah.test', password: 'Testpass123' }),
+    });
+    const { refreshToken } = (await login.json()) as { refreshToken: string };
+    const res = await api('/api/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { accessToken: string; refreshToken: string };
+    expect(data.accessToken).toBeTruthy();
+    expect(data.refreshToken).toBeTruthy();
+  });
+
+  it('revoked refresh token is rejected', async () => {
+    const login = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'testadmin@ghazwah.test', password: 'Testpass123' }),
+    });
+    const { refreshToken } = (await login.json()) as { refreshToken: string };
+    // Logout (revokes refresh token)
+    await api('/api/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+    });
+    // Try to refresh with revoked token
+    const res = await api('/api/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+    });
     expect(res.status).toBe(401);
   });
 
@@ -105,8 +142,8 @@ describe('auth', () => {
       method: 'POST',
       body: JSON.stringify({ email: 'testadmin@ghazwah.test', password: 'Testpass123' }),
     });
-    const { token } = (await meLogin.json()) as { token: string };
-    const me = await api('/api/auth/me', { token });
+    const { accessToken } = (await meLogin.json()) as { accessToken: string };
+    const me = await api('/api/auth/me', { token: accessToken });
     const meText = await me.text();
     expect(meText).not.toContain('password');
     expect(meText).not.toContain('$2a$');
@@ -123,17 +160,17 @@ describe('role authorization', () => {
       method: 'POST',
       body: JSON.stringify({ email: 'testadmin@ghazwah.test', password: 'Testpass123' }),
     });
-    adminToken = ((await aLogin.json()) as { token: string }).token;
+    adminToken = ((await aLogin.json()) as { accessToken: string }).accessToken;
 
     await api('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email: 'rolecustomer@ghazwah.test', name: 'Role Customer', password: 'Custpass123', role: 'customer' }),
+      body: JSON.stringify({ email: 'rolecustomer@ghazwah.test', name: 'Role Customer', password: 'Custpass123' }),
     });
     const cLogin = await api('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email: 'rolecustomer@ghazwah.test', password: 'Custpass123' }),
     });
-    customerToken = ((await cLogin.json()) as { token: string }).token;
+    customerToken = ((await cLogin.json()) as { accessToken: string }).accessToken;
   });
 
   it('admin can access /admin-only', async () => {
@@ -151,4 +188,3 @@ describe('role authorization', () => {
     expect(res.status).toBe(401);
   });
 });
-

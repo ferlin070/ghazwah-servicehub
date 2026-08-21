@@ -12,5 +12,7 @@ export default defineConfig({
   },
   define: {
     'process.env.NODE_ENV': JSON.stringify('test'),
+    'process.env.JWT_SECRET': JSON.stringify('test-secret-key-for-testing-only'),
+    'process.env.DATABASE_URL': JSON.stringify(process.env.DATABASE_URL ?? 'postgresql://localhost:5432/ghazwah_test'),
   },
 });

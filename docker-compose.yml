@@ -1,17 +1,32 @@
-# docker-compose.yml — Ghazwah ServiceHub one-command deploy.
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ghazwah
+      POSTGRES_USER: ghazwah
+      POSTGRES_PASSWORD: ghazwah_secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ghazwah"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     ports:
       - "3000:3000"
     environment:
-      - PORT=3000
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
-      - DB_PATH=/app/data/app.db
-    volumes:
-      - app-data:/app/data
-    restart: unless-stopped
+      DATABASE_URL: postgresql://ghazwah:ghazwah_secret@db:5432/ghazwah
+      JWT_SECRET: change-me-in-production-to-a-random-string
+      CORS_ORIGIN: http://localhost:5173
+      PORT: 3000
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
-  app-data:
+  pgdata:

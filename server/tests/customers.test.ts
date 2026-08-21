@@ -1,6 +1,9 @@
-﻿// customers.test.ts â€” customer CRUD + authorization tests.
+﻿// customers.test.ts — customer CRUD + authorization tests.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from './helpers.ts';
+import { query } from '../src/lib/query.ts';
+import { hashPassword } from '../src/lib/crypto.ts';
+import { randomId } from '../src/lib/id.ts';
 
 let baseUrl: string;
 let server: ReturnType<typeof import('@hono/node-server')['serve']>;
@@ -11,27 +14,41 @@ let testCustomerId: string;
 
 beforeAll(async () => {
   ({ server, baseUrl } = await buildApp());
-  // Seed test users
-  const adminLogin = await fetch(`${baseUrl}/api/auth/register`, {
+
+  // Create admin/staff via direct DB insert (admin-register requires admin auth)
+  const adminHash = await hashPassword('Testpass123');
+  const adminUid = randomId();
+  await query.run(
+    `INSERT INTO users (id, email, name, password, role) VALUES (?, ?, ?, ?, 'admin')`,
+    adminUid, 'custadmin@ghazwah.test', 'Cust Admin', adminHash,
+  );
+  const adminLogin = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'custadmin@ghazwah.test', name: 'Cust Admin', password: 'Testpass123', role: 'admin' }),
+    body: JSON.stringify({ email: 'custadmin@ghazwah.test', password: 'Testpass123' }),
   });
-  adminToken = ((await adminLogin.json()) as { token: string }).token;
+  adminToken = ((await adminLogin.json()) as { accessToken: string }).accessToken;
 
-  const staffLogin = await fetch(`${baseUrl}/api/auth/register`, {
+  const staffHash = await hashPassword('Testpass123');
+  const staffUid = randomId();
+  await query.run(
+    `INSERT INTO users (id, email, name, password, role) VALUES (?, ?, ?, ?, 'staff')`,
+    staffUid, 'custstaff@ghazwah.test', 'Cust Staff', staffHash,
+  );
+  const staffLogin = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'custstaff@ghazwah.test', name: 'Cust Staff', password: 'Testpass123', role: 'staff' }),
+    body: JSON.stringify({ email: 'custstaff@ghazwah.test', password: 'Testpass123' }),
   });
-  staffToken = ((await staffLogin.json()) as { token: string }).token;
+  staffToken = ((await staffLogin.json()) as { accessToken: string }).accessToken;
 
+  // Register customer via public endpoint
   const customerLogin = await fetch(`${baseUrl}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'custuser@ghazwah.test', name: 'Cust User', password: 'Testpass123', role: 'customer' }),
+    body: JSON.stringify({ email: 'custuser@ghazwah.test', name: 'Cust User', password: 'Testpass123' }),
   });
-  customerToken = ((await customerLogin.json()) as { token: string }).token;
+  customerToken = ((await customerLogin.json()) as { accessToken: string }).accessToken;
 });
 
 afterAll(() => {
@@ -97,7 +114,6 @@ describe('customer CRUD', () => {
       token: adminToken,
     });
     expect(res.status).toBe(200);
-    // Verify deleted
     const getRes = await api(`/api/customers/${testCustomerId}`, { token: adminToken });
     expect(getRes.status).toBe(404);
   });
@@ -121,4 +137,3 @@ describe('customer CRUD', () => {
     expect(res.status).toBe(400);
   });
 });
-

@@ -1,4 +1,4 @@
-// routes/workOrders.ts — work order / repair system.
+﻿// routes/workOrders.ts â€” work order / repair system.
 // admin/staff: full CRUD + status flow. customer: read own work orders only.
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -7,6 +7,7 @@ import { query } from '../lib/query.ts';
 import { authenticate, requireRole } from '../middleware/auth.ts';
 import { randomId } from '../lib/id.ts';
 import { parsePagination, makeMeta } from '../lib/pagination.ts';
+import { sseManager } from '../lib/sse.ts';
 
 const workOrders = new Hono<{
   Variables: { user: { userId: string; role: string } | null };
@@ -134,7 +135,7 @@ workOrders.get('/:id', async (c) => {
   return c.json({ work_order: row });
 });
 
-// POST /api/work-orders — admin/staff
+// POST /api/work-orders â€” admin/staff
 workOrders.post('/', requireRole('admin', 'staff'), zValidator('json', workOrderSchema), async (c) => {
   const user = c.get('user')!;
   const body = c.req.valid('json' as never) as z.infer<typeof workOrderSchema>;
@@ -179,7 +180,7 @@ workOrders.post('/', requireRole('admin', 'staff'), zValidator('json', workOrder
   return c.json({ work_order: row }, 201);
 });
 
-// PUT /api/work-orders/:id — admin/staff
+// PUT /api/work-orders/:id â€” admin/staff
 workOrders.put('/:id', requireRole('admin', 'staff'), zValidator('json', workOrderUpdateSchema), async (c) => {
   const user = c.get('user')!;
   const id = c.req.param('id');
@@ -205,7 +206,7 @@ workOrders.put('/:id', requireRole('admin', 'staff'), zValidator('json', workOrd
       }
       // If completing, set completed_date
       if (v === 'completed' && !existing.completed_date) {
-        fields.push('completed_date = datetime(\'now\')');
+        fields.push('completed_date = NOW()');
       }
       // Auto-add timeline event for status change
       const eventMap: Record<string, string> = {
@@ -229,15 +230,26 @@ workOrders.put('/:id', requireRole('admin', 'staff'), zValidator('json', workOrd
     values.push(v);
   }
   if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400);
-  fields.push(`updated_at = datetime('now')`);
+  fields.push(`updated_at = NOW()`);
   values.push(id);
 
   await query.run(`UPDATE work_orders SET ${fields.join(', ')} WHERE id = ?`, ...values);
   const row = await query.get('SELECT * FROM work_orders WHERE id = ?', id);
+
+  // Broadcast real-time update via SSE
+  if (body.status) {
+    sseManager.broadcast('work_order_updated', {
+      workOrderId: id,
+      orderNumber: row?.order_number,
+      status: body.status,
+      customerId: row?.customer_id,
+    });
+  }
+
   return c.json({ work_order: row });
 });
 
-// DELETE /api/work-orders/:id — admin only
+// DELETE /api/work-orders/:id â€” admin only
 workOrders.delete('/:id', requireRole('admin'), async (c) => {
   const id = c.req.param('id');
   const existing = await query.get('SELECT id FROM work_orders WHERE id = ?', id);
@@ -248,3 +260,4 @@ workOrders.delete('/:id', requireRole('admin'), async (c) => {
 });
 
 export default workOrders;
+

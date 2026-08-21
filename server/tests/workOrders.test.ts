@@ -1,13 +1,16 @@
-﻿// workOrders.test.ts â€” work order CRUD + status flow + timeline tests.
+﻿// workOrders.test.ts — work order CRUD + status flow + timeline tests.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from './helpers.ts';
 import { query } from '../src/lib/query.ts';
+import { hashPassword } from '../src/lib/crypto.ts';
+import { randomId } from '../src/lib/id.ts';
 
 let baseUrl: string;
 let server: ReturnType<typeof import('@hono/node-server')['serve']>;
 let adminToken: string;
 let staffToken: string;
 let customerToken: string;
+let staffUserId: string;
 let customerId: string;
 let deviceId: string;
 let workOrderId: string;
@@ -15,42 +18,53 @@ let workOrderId: string;
 beforeAll(async () => {
   ({ server, baseUrl } = await buildApp());
 
-  // Register admin, staff, customer
-  const adminReg = await fetch(`${baseUrl}/api/auth/register`, {
+  // Create admin directly in DB
+  const adminHash = await hashPassword('Testpass123');
+  const adminUid = randomId();
+  await query.run(
+    `INSERT INTO users (id, email, name, password, role) VALUES (?, ?, ?, ?, 'admin')`,
+    adminUid, 'wo-admin@ghazwah.test', 'WO Admin', adminHash,
+  );
+  const adminLogin = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'wo-admin@ghazwah.test', name: 'WO Admin', password: 'Testpass123', role: 'admin' }),
+    body: JSON.stringify({ email: 'wo-admin@ghazwah.test', password: 'Testpass123' }),
   });
-  adminToken = ((await adminReg.json()) as { token: string }).token;
+  adminToken = ((await adminLogin.json()) as { accessToken: string }).accessToken;
 
-  const staffReg = await fetch(`${baseUrl}/api/auth/register`, {
+  // Create staff directly in DB
+  const staffHash = await hashPassword('Testpass123');
+  staffUserId = randomId();
+  await query.run(
+    `INSERT INTO users (id, email, name, password, role) VALUES (?, ?, ?, ?, 'staff')`,
+    staffUserId, 'wo-staff@ghazwah.test', 'WO Staff', staffHash,
+  );
+  const staffLogin = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'wo-staff@ghazwah.test', name: 'WO Staff', password: 'Testpass123', role: 'staff' }),
+    body: JSON.stringify({ email: 'wo-staff@ghazwah.test', password: 'Testpass123' }),
   });
-  const staffData = (await staffReg.json()) as { token: string; user: { id: string } };
-  staffToken = staffData.token;
-  const staffUserId = staffData.user.id;
+  staffToken = ((await staffLogin.json()) as { accessToken: string }).accessToken;
 
+  // Register customer via public endpoint
   const custReg = await fetch(`${baseUrl}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'wo-customer@ghazwah.test', name: 'WO Customer', password: 'Testpass123', role: 'customer' }),
+    body: JSON.stringify({ email: 'wo-customer@ghazwah.test', name: 'WO Customer', password: 'Testpass123' }),
   });
-  customerToken = ((await custReg.json()) as { token: string }).token;
+  customerToken = ((await custReg.json()) as { accessToken: string }).accessToken;
 
-  // Get customer id from user_id
+  // Get customer id
   const custRow = await query.get('SELECT id FROM customers WHERE name = ?', 'WO Customer');
   customerId = custRow?.id as string;
 
-  // Admin creates a device for this customer
+  // Admin creates a device
   const devRes = await fetch(`${baseUrl}/api/devices`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
     body: JSON.stringify({ customer_id: customerId, brand: 'Dell', model: 'Latitude 5420', serial_number: 'DL5420-TEST', device_type: 'laptop', condition: 'Good' }),
   });
-  const devData = (await devRes.json()) as { device: { id: string } };
-  deviceId = devData.device.id;
+  deviceId = ((await devRes.json()) as { device: { id: string } }).device.id;
 
   // Admin creates a work order
   const woRes = await fetch(`${baseUrl}/api/work-orders`, {
@@ -58,8 +72,7 @@ beforeAll(async () => {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
     body: JSON.stringify({ customer_id: customerId, device_id: deviceId, problem: 'Screen not working', technician_id: staffUserId, priority: 'high', estimated_cost: 200 }),
   });
-  const woData = (await woRes.json()) as { work_order: { id: string; order_number: string } };
-  workOrderId = woData.work_order.id;
+  workOrderId = ((await woRes.json()) as { work_order: { id: string } }).work_order.id;
 });
 
 afterAll(() => {
@@ -140,11 +153,11 @@ describe('work orders', () => {
   });
 
   it('rejects creating work order with device belonging to different customer', async () => {
-    // Create another customer + device
+    // Register another customer
     await fetch(`${baseUrl}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'wo-cust2@ghazwah.test', name: 'WO Customer 2', password: 'Testpass123', role: 'customer' }),
+      body: JSON.stringify({ email: 'wo-cust2@ghazwah.test', name: 'WO Customer 2', password: 'Testpass123' }),
     });
     const cust2Row = await query.get('SELECT id FROM customers WHERE name = ?', 'WO Customer 2');
     const cid2 = cust2Row?.id as string;
@@ -157,4 +170,3 @@ describe('work orders', () => {
     expect(res.status).toBe(400);
   });
 });
-

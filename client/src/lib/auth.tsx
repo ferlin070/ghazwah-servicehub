@@ -1,7 +1,13 @@
-// AuthContext.tsx — auth state + login/register/logout.
+// AuthContext.tsx — auth state + login/register/logout with refresh tokens.
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
-import { api, setToken, clearToken } from './api.ts';
-import type { User, AuthResponse } from './types.ts';
+import { api, setTokens, clearTokens, getRefreshToken } from './api.ts';
+import type { User } from './types.ts';
+
+interface AuthResponse {
+  user: User;
+  accessToken: string;
+  refreshToken: string;
+}
 
 interface AuthContextValue {
   user: User | null;
@@ -19,26 +25,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Check existing token on mount
   useState(() => {
+    if (!getRefreshToken()) {
+      setLoading(false);
+      return;
+    }
     api.get<{ user: User }>('/auth/me')
       .then((data) => setUser(data.user))
-      .catch(() => {})
+      .catch(() => clearTokens())
       .finally(() => setLoading(false));
   });
 
   const login = useCallback(async (email: string, password: string) => {
     const data = await api.post<AuthResponse>('/auth/login', { email, password });
-    setToken(data.token);
+    setTokens(data.accessToken, data.refreshToken);
     setUser(data.user);
   }, []);
 
   const register = useCallback(async (email: string, name: string, password: string) => {
     const data = await api.post<AuthResponse>('/auth/register', { email, name, password });
-    setToken(data.token);
+    setTokens(data.accessToken, data.refreshToken);
     setUser(data.user);
   }, []);
 
   const logout = useCallback(() => {
-    clearToken();
+    // Revoke refresh token on server
+    const rt = getRefreshToken();
+    if (rt) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: rt }),
+      }).catch(() => {});
+    }
+    clearTokens();
     setUser(null);
   }, []);
 

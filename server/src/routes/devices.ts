@@ -1,4 +1,4 @@
-// routes/devices.ts — device management.
+﻿// routes/devices.ts â€” device management.
 // admin/staff: full CRUD. customer: read own devices only.
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -80,7 +80,7 @@ devices.get('/:id', async (c) => {
   return c.json({ device: row });
 });
 
-// POST /api/devices — admin/staff only
+// POST /api/devices â€” admin/staff only
 devices.post('/', authenticate, requireRole('admin', 'staff'), zValidator('json', deviceSchema), async (c) => {
   const body = c.req.valid('json' as never) as z.infer<typeof deviceSchema>;
   const id = randomId();
@@ -99,7 +99,7 @@ devices.post('/', authenticate, requireRole('admin', 'staff'), zValidator('json'
   return c.json({ device: row }, 201);
 });
 
-// PUT /api/devices/:id — admin/staff only
+// PUT /api/devices/:id â€” admin/staff only
 devices.put('/:id', authenticate, requireRole('admin', 'staff'), zValidator('json', deviceUpdateSchema), async (c) => {
   const id = c.req.param('id');
   const body = c.req.valid('json' as never) as z.infer<typeof deviceUpdateSchema>;
@@ -113,7 +113,7 @@ devices.put('/:id', authenticate, requireRole('admin', 'staff'), zValidator('jso
     values.push(v);
   }
   if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400);
-  fields.push(`updated_at = datetime('now')`);
+  fields.push(`updated_at = NOW()`);
   values.push(id);
 
   await query.run(`UPDATE devices SET ${fields.join(', ')} WHERE id = ?`, ...values);
@@ -121,7 +121,7 @@ devices.put('/:id', authenticate, requireRole('admin', 'staff'), zValidator('jso
   return c.json({ device: row });
 });
 
-// DELETE /api/devices/:id — admin only
+// DELETE /api/devices/:id â€” admin only
 devices.delete('/:id', authenticate, requireRole('admin'), async (c) => {
   const id = c.req.param('id');
   const existing = await query.get('SELECT id FROM devices WHERE id = ?', id);
@@ -132,3 +132,4 @@ devices.delete('/:id', authenticate, requireRole('admin'), async (c) => {
 });
 
 export default devices;
+
