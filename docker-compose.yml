@@ -1,0 +1,17 @@
+# docker-compose.yml — Ghazwah ServiceHub one-command deploy.
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
+      - DB_PATH=/app/data/app.db
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  app-data:
